@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"expvar"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"net"
 
 	"github.com/coocood/freecache"
+	pb "github.com/envoyproxy/go-control-plane/envoy/service/ratelimit/v2"
 	"github.com/envoyproxy/ratelimit/src/settings"
 	"github.com/gorilla/mux"
 	reuseport "github.com/kavu/go_reuseport"
@@ -50,6 +52,35 @@ type server struct {
 func (server *server) AddDebugHttpEndpoint(path string, help string, handler http.HandlerFunc) {
 	server.debugListener.debugMux.HandleFunc(path, handler)
 	server.debugListener.endpoints[path] = help
+}
+
+func (server *server) AddJsonHandler(svc pb.RateLimitServiceServer) {
+	handler := func(writer http.ResponseWriter, request *http.Request) {
+		var req pb.RateLimitRequest
+
+		if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+			logger.Warnf("error: %s", err.Error())
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+		}
+
+		fmt.Printf("descriptors:%s\n", req.Descriptors)
+		resp, err := svc.ShouldRateLimit(nil, &req)
+		if err != nil {
+			logger.Warnf("error: %s", err.Error())
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			return
+		}
+		logger.Debugf("resp:%s", resp)
+		if resp.OverallCode == pb.RateLimitResponse_OK {
+			return
+		} else if resp.OverallCode == pb.RateLimitResponse_OVER_LIMIT {
+			http.Error(writer, "over limit", http.StatusTooManyRequests)
+		} else if resp.OverallCode == pb.RateLimitResponse_UNKNOWN {
+			http.Error(writer, "unknown", http.StatusInternalServerError)
+		}
+
+	}
+	server.router.HandleFunc("/json", handler)
 }
 
 func (server *server) GrpcServer() *grpc.Server {
