@@ -54,6 +54,10 @@ func (server *server) AddDebugHttpEndpoint(path string, help string, handler htt
 	server.debugListener.endpoints[path] = help
 }
 
+// add an http/1 handler at the /json endpoint which allows this ratelimit service to work with
+// clients that cannot use the gRPC interface (e.g. lua)
+// example usage from cURL with domain "dummy" and descriptor "perday":
+// echo '{"domain": "dummy", "descriptors": [{"entries": [{"key": "perday"}]}]}' | curl -vvvXPOST --data @/dev/stdin localhost:8080/json
 func (server *server) AddJsonHandler(svc pb.RateLimitServiceServer) {
 	handler := func(writer http.ResponseWriter, request *http.Request) {
 		var req pb.RateLimitRequest
